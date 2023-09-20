@@ -13,19 +13,16 @@ type Dbp struct {
 }
 
 func NewDbp() *Dbp {
-	return &Dbp{}
+	return &Dbp{
+		json:  NewJsonDataBuilder(),
+		proto: NewProtobufDataBuilder(),
+	}
 }
 
 func (p *Dbp) Provider(name Name) DataBuilder {
 	if name == Json {
-		p.Do(func() {
-			p.json = NewJsonDataBuilder()
-		})
 		return p.json
 	}
 
-	p.Do(func() {
-		p.proto = NewProtobufDataBuilder()
-	})
 	return p.proto
 }
