@@ -16,8 +16,10 @@ type Provider func(firstPkg []byte) (Name, Codec, PkgBuilder, []byte)
 func TcpDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG) Provider {
 	return func(firstPkg []byte) (Name, Codec, PkgBuilder, []byte) {
 		tag := firstPkg[0]
-		firstPkg = firstPkg[1:]
-		if tag == byte('j') {
+		if tag != byte('{') {
+			firstPkg = firstPkg[1:]
+		}
+		if tag == byte('j') || tag == byte('{') {
 			return Json, NewDelimiterCodec([]byte("\n\n"), []byte("\n\n")), NewJsonPackageBuilder(toData, toPKG), firstPkg
 		}
 
@@ -28,8 +30,10 @@ func TcpDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG)
 func WssDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG) Provider {
 	return func(firstPkg []byte) (Name, Codec, PkgBuilder, []byte) {
 		tag := firstPkg[0]
-		firstPkg = firstPkg[1:]
-		if tag == byte('j') {
+		if tag != byte('{') {
+			firstPkg = firstPkg[1:]
+		}
+		if tag == byte('j') || tag == byte('{') {
 			return Json, NewWebsocketCodec(), NewJsonPackageBuilder(toData, toPKG), firstPkg
 		}
 
@@ -40,7 +44,10 @@ func WssDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG)
 func UdpDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG) Provider {
 	return func(firstPkg []byte) (Name, Codec, PkgBuilder, []byte) {
 		tag := firstPkg[0]
-		if tag == byte('{') {
+		if tag != byte('{') {
+			firstPkg = firstPkg[1:]
+		}
+		if tag == byte('j') || tag == byte('{') {
 			return Json, NewWebsocketCodec(), NewJsonPackageBuilder(toData, toPKG), firstPkg
 		}
 
