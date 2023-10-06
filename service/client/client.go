@@ -24,7 +24,6 @@ type Client struct {
 	pgb      codec.PkgBuilder
 	dbd      codec.DataBuilder
 	logger   *zap.Logger
-	gpp      GatewayPackageProvider
 }
 
 type listenHandler struct {
@@ -32,22 +31,13 @@ type listenHandler struct {
 	structure DataStructure
 	handler   Handler
 }
-type GwPkg struct {
-	Action uint32
-	Data   []byte
-}
-type GatewayPackageProvider interface {
-	Gen(actionId uint32, data []byte) codec.DataPtr
-	Trans(p codec.DataPtr) GwPkg
-}
 
-func New(ctx context.Context, network string, host string, cdc codec.Codec, pgb codec.PkgBuilder, dbd codec.DataBuilder, gpp GatewayPackageProvider, options ...Option) *Client {
+func New(ctx context.Context, network string, host string, cdc codec.Codec, pgb codec.PkgBuilder, dbd codec.DataBuilder, options ...Option) *Client {
 	c := &Client{
 		c:   client.New(ctx, network, host),
 		cdc: cdc,
 		pgb: pgb,
 		dbd: dbd,
-		gpp: gpp,
 	}
 	c.With(options...)
 	c.c.With(client.Message(c.dispatch))
@@ -92,7 +82,10 @@ func (c *Client) Pack(action codec.Action, data codec.DataPtr) ([]byte, error) {
 	}
 	// todo encrypt
 	// action封包
-	b1, err := c.pgb.Pack(c.gpp.Gen(action.Id.Val(), b))
+	b1, err := c.pgb.Pack(&codec.PKG{
+		Action: action.Id,
+		Data:   b,
+	})
 	if err != nil {
 		return nil, NewWrappedError("send action["+action.Name+"] failed,pack gateway package failed", err)
 	}
@@ -160,8 +153,7 @@ func (c *Client) dispatch(pkg []byte) {
 			c.logger.Debug("dispatcher: received package", zap.ByteString("pkg", codePkg))
 		}
 		// 网关层的包拆包
-		gatewayPackage1, err1 := c.pgb.Unpack(codePkg)
-		gatewayPackage := c.gpp.Trans(gatewayPackage1)
+		gatewayPackage, err1 := c.pgb.Unpack(codePkg)
 		if err1 != nil {
 			if c.logger != nil {
 				c.logger.Error("dispatcher: unpack gateway package failed, err=" + err.Error())
