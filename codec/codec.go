@@ -34,6 +34,8 @@ func NewDelimiterCodec(sendDelimiter, receiveDelimiter []byte) Codec {
 func (codec *delimiterCodec) Marshal(b []byte) (d []byte, err error) {
 	if !bytes.HasSuffix(b, codec.sendDelimiter) {
 		d = append(b, codec.sendDelimiter...)
+	} else {
+		d = b
 	}
 
 	return

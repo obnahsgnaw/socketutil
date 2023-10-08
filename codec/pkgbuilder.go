@@ -96,7 +96,11 @@ func (pp *JsonPackageBuilder) Unpack(b []byte) (p *PKG, err error) {
 		return
 	}
 	p1 := pp.gen(&PKG{})
-	if err = json.Unmarshal(b, &p1); err != nil {
+	if p1 == nil {
+		err = unpackErr(errors.New("unpack to data is nil"))
+		return
+	}
+	if err = json.Unmarshal(b, p1); err != nil {
 		err = unpackErr(err)
 	}
 
@@ -112,6 +116,10 @@ func (pp *JsonPackageBuilder) Pack(p *PKG) (b []byte, err error) {
 		return
 	}
 	p1 := pp.gen(p)
+	if p1 == nil {
+		err = unpackErr(errors.New("pack to data is nil"))
+		return
+	}
 	if b, err = json.Marshal(p1); err != nil {
 		err = packErr(err)
 	}

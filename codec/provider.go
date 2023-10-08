@@ -20,7 +20,7 @@ func TcpDefaultProvider(toData func(p *PKG) DataPtr, toPKG func(d DataPtr) *PKG)
 			firstPkg = firstPkg[1:]
 		}
 		if tag == byte('j') || tag == byte('{') {
-			return Json, NewDelimiterCodec([]byte("\n\n"), []byte("\n\n")), NewJsonPackageBuilder(toData, toPKG), firstPkg
+			return Json, NewDelimiterCodec([]byte("\\N\\B"), []byte("\\N\\B")), NewJsonPackageBuilder(toData, toPKG), firstPkg
 		}
 
 		return Proto, NewLengthCodec(0xAB, 1024), NewProtobufPackageBuilder(toData, toPKG), firstPkg

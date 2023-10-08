@@ -31,6 +31,9 @@ func (pb *protobufDataBuilder) Unpack(b []byte, p DataPtr) (err error) {
 	if len(b) == 0 {
 		return
 	}
+	if p == nil {
+		return nil
+	}
 	if m, ok := p.(proto.Message); ok {
 		err = proto.Unmarshal(b, m)
 	} else {
@@ -60,7 +63,7 @@ func NewJsonDataBuilder() DataBuilder {
 }
 
 func (pb *jsonDataBuilder) Unpack(b []byte, p DataPtr) (err error) {
-	if len(b) == 0 {
+	if len(b) == 0 || p == nil {
 		return
 	}
 	return json.Unmarshal(b, p)
