@@ -1,4 +1,12 @@
 
+<a name="v0.5.1"></a>
+## [v0.5.1](https://8.140.161.172/wangsb/wgateway/compare/v0.5.0...v0.5.1) (2023-10-08)
+
+### Bug Fixes
+
+* **client:** fix client logger
+
+
 <a name="v0.5.0"></a>
 ## [v0.5.0](https://8.140.161.172/wangsb/wgateway/compare/v0.4.1...v0.5.0) (2023-10-08)
 
