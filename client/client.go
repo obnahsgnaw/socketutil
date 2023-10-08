@@ -69,7 +69,9 @@ func (c *Client) Start() {
 	c.startListen()
 	c.dispatch()
 	c.tryConnect()
-	c.logger.Info("client start")
+	if c.logger != nil {
+		c.logger.Info("client start")
+	}
 }
 
 func (c *Client) Stop() {
