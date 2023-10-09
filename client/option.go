@@ -2,6 +2,7 @@ package client
 
 import (
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -25,9 +26,9 @@ func Keepalive(interval time.Duration) Option {
 	}
 }
 
-func Logger(logger *zap.Logger) Option {
+func Logger(watcher func(level zapcore.Level, msg string, data ...zap.Field)) Option {
 	return func(client *Client) {
-		client.logger = logger
+		client.watcher = watcher
 	}
 }
 

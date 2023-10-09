@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"io"
+	"log"
 	"net"
 	"syscall"
 	"time"
@@ -23,7 +25,7 @@ type Client struct {
 	disconnectedHandler func(index int)
 	messageHandler      func(pkg []byte)
 	pkgChan             chan []byte
-	logger              *zap.Logger
+	watcher             func(level zapcore.Level, msg string, data ...zap.Field)
 	Tmp                 []byte
 	keepAlive           time.Duration
 	network             string
@@ -46,6 +48,9 @@ func New(ctx context.Context, network string, host string, options ...Option) *C
 		connectedHandler:    func(index int) {},
 		disconnectedHandler: func(index int) {},
 		messageHandler:      func(pkg []byte) {},
+		watcher: func(level zapcore.Level, msg string, data ...zap.Field) {
+			log.Println(level.String(), msg)
+		},
 	}
 	c.With(options...)
 	return c
@@ -57,10 +62,6 @@ func (c *Client) With(options ...Option) {
 	}
 }
 
-func (c *Client) Logger() *zap.Logger {
-	return c.logger
-}
-
 func (c *Client) Host() string {
 	return c.host
 }
@@ -69,16 +70,11 @@ func (c *Client) Start() {
 	c.startListen()
 	c.dispatch()
 	c.tryConnect()
-	if c.logger != nil {
-		c.logger.Info("client start")
-	}
+	c.watcher(zapcore.InfoLevel, "client start")
 }
 
 func (c *Client) Stop() {
-	if c.logger != nil {
-		c.logger.Info("client stop")
-		_ = c.logger.Sync()
-	}
+	c.watcher(zapcore.InfoLevel, "client stop")
 	c.reset()
 	c.cancel()
 	close(c.pkgChan)
@@ -89,6 +85,12 @@ func (c *Client) Send(pkg []byte) error {
 		return errors.New("client error: not connected")
 	}
 	_, err := c.conn.Write(pkg)
+
+	if err != nil {
+		c.watcher(zapcore.ErrorLevel, "send package["+string(pkg)+"]failed,err="+err.Error())
+	} else {
+		c.watcher(zapcore.DebugLevel, "send package["+string(pkg)+"] success")
+	}
 
 	return err
 }
@@ -108,13 +110,9 @@ func (c *Client) heartbeat(pkg []byte) {
 	if c.conn == nil {
 		return
 	}
-	if c.logger != nil {
-		c.logger.Debug("heartbeat")
-	}
+	c.watcher(zapcore.DebugLevel, "heartbeat")
 	if err := c.Send(pkg); err != nil {
-		if c.logger != nil {
-			c.logger.Error("heartbeat failed,err=" + err.Error())
-		}
+		c.watcher(zapcore.ErrorLevel, "heartbeat failed,err="+err.Error())
 	}
 }
 
@@ -137,9 +135,7 @@ func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
 }
 
 func (c *Client) startListen() {
-	if c.logger != nil {
-		c.logger.Debug("client listen start")
-	}
+	c.watcher(zapcore.DebugLevel, "client listen start")
 	c.loopHandle(0, func() bool {
 		if c.conn == nil {
 			time.Sleep(time.Millisecond * 100)
@@ -164,15 +160,14 @@ func (c *Client) startListen() {
 }
 
 func (c *Client) dispatch() {
-	if c.logger != nil {
-		c.logger.Debug("client package dispatch start.")
-	}
+	c.watcher(zapcore.DebugLevel, "client package dispatch start")
 	go func(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case pkg := <-c.pkgChan:
+				c.watcher(zapcore.DebugLevel, "receive package:"+string(pkg))
 				c.messageHandler(pkg)
 			}
 		}
@@ -180,27 +175,21 @@ func (c *Client) dispatch() {
 }
 
 func (c *Client) tryConnect() {
-	if c.logger != nil {
-		c.logger.Debug("client connect loop start.")
-	}
+	c.watcher(zapcore.DebugLevel, "client connect loop start")
 	c.loopHandle(c.retryInterval, func() bool {
 		if c.conn != nil {
 			return true
 		}
 
 		if err := c.connect(); err != nil {
-			if c.logger != nil {
-				c.logger.Error("client connect failed, err=" + err.Error())
-			}
+			c.watcher(zapcore.ErrorLevel, "client connect failed, err="+err.Error())
 		} else {
 			c.connectIndex++
 			c.connectedHandler(c.connectIndex)
 		}
 
 		if c.retryInterval == 0 {
-			if c.logger != nil {
-				c.logger.Warn("client connect loop stopped, no retry interval")
-			}
+			c.watcher(zapcore.WarnLevel, "client connect loop stopped, no retry interval")
 			return false
 		}
 		return true

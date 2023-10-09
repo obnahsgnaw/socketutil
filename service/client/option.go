@@ -3,6 +3,7 @@ package client
 import (
 	client2 "github.com/obnahsgnaw/socketutil/client"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -38,9 +39,9 @@ func Disconnect(handler func(index int)) Option {
 	}
 }
 
-func Logger(l *zap.Logger) Option {
+func Logger(watcher func(level zapcore.Level, msg string, data ...zap.Field)) Option {
 	return func(client *Client) {
-		client.logger = l
-		client.c.With(client2.Logger(l))
+		client.watcher = watcher
+		client.c.With(client2.Logger(watcher))
 	}
 }
