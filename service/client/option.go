@@ -39,7 +39,7 @@ func Disconnect(handler func(index int)) Option {
 	}
 }
 
-func Logger(watcher func(level zapcore.Level, msg string, data ...zap.Field)) Option {
+func Logger(watcher func(eventType client2.ET, level zapcore.Level, msg string, data ...zap.Field)) Option {
 	return func(client *Client) {
 		client.watcher = watcher
 		client.c.With(client2.Logger(watcher))

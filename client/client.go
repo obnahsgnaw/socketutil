@@ -12,6 +12,24 @@ import (
 	"time"
 )
 
+type ET int
+
+var EtMsg = map[ET]string{
+	SysET:     "server",
+	SendET:    "send",
+	ReceiveET: "receive",
+}
+
+func (e ET) String() string {
+	return EtMsg[e]
+}
+
+const (
+	SysET     ET = 0
+	SendET    ET = 1
+	ReceiveET ET = 2
+)
+
 type Client struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -25,7 +43,7 @@ type Client struct {
 	disconnectedHandler func(index int)
 	messageHandler      func(pkg []byte)
 	pkgChan             chan []byte
-	watcher             func(level zapcore.Level, msg string, data ...zap.Field)
+	watcher             func(eventType ET, level zapcore.Level, msg string, data ...zap.Field)
 	Tmp                 []byte
 	keepAlive           time.Duration
 	network             string
@@ -48,7 +66,7 @@ func New(ctx context.Context, network string, host string, options ...Option) *C
 		connectedHandler:    func(index int) {},
 		disconnectedHandler: func(index int) {},
 		messageHandler:      func(pkg []byte) {},
-		watcher: func(level zapcore.Level, msg string, data ...zap.Field) {
+		watcher: func(eventType ET, level zapcore.Level, msg string, data ...zap.Field) {
 			log.Println(level.String(), msg)
 		},
 	}
@@ -70,11 +88,11 @@ func (c *Client) Start() {
 	c.startListen()
 	c.dispatch()
 	c.tryConnect()
-	c.watcher(zapcore.InfoLevel, "client start")
+	c.watcher(SysET, zapcore.InfoLevel, "client start")
 }
 
 func (c *Client) Stop() {
-	c.watcher(zapcore.InfoLevel, "client stop")
+	c.watcher(SysET, zapcore.InfoLevel, "client stop")
 	c.reset()
 	c.cancel()
 	close(c.pkgChan)
@@ -87,9 +105,9 @@ func (c *Client) Send(pkg []byte) error {
 	_, err := c.conn.Write(pkg)
 
 	if err != nil {
-		c.watcher(zapcore.ErrorLevel, "send package["+string(pkg)+"]failed,err="+err.Error())
+		c.watcher(SendET, zapcore.ErrorLevel, "send package["+string(pkg)+"]failed,err="+err.Error())
 	} else {
-		c.watcher(zapcore.DebugLevel, "send package["+string(pkg)+"] success")
+		c.watcher(SendET, zapcore.DebugLevel, "send package["+string(pkg)+"] success")
 	}
 
 	return err
@@ -110,9 +128,9 @@ func (c *Client) heartbeat(pkg []byte) {
 	if c.conn == nil {
 		return
 	}
-	c.watcher(zapcore.DebugLevel, "heartbeat")
+	c.watcher(SendET, zapcore.DebugLevel, "heartbeat")
 	if err := c.Send(pkg); err != nil {
-		c.watcher(zapcore.ErrorLevel, "heartbeat failed,err="+err.Error())
+		c.watcher(SendET, zapcore.ErrorLevel, "heartbeat failed,err="+err.Error())
 	}
 }
 
@@ -135,7 +153,7 @@ func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
 }
 
 func (c *Client) startListen() {
-	c.watcher(zapcore.DebugLevel, "client listen start")
+	c.watcher(SysET, zapcore.DebugLevel, "client listen start")
 	c.loopHandle(0, func() bool {
 		if c.conn == nil {
 			time.Sleep(time.Millisecond * 100)
@@ -160,14 +178,14 @@ func (c *Client) startListen() {
 }
 
 func (c *Client) dispatch() {
-	c.watcher(zapcore.DebugLevel, "client package dispatch start")
+	c.watcher(SysET, zapcore.DebugLevel, "client package dispatch start")
 	go func(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case pkg := <-c.pkgChan:
-				c.watcher(zapcore.DebugLevel, "receive package:"+string(pkg))
+				c.watcher(ReceiveET, zapcore.DebugLevel, "receive package:"+string(pkg))
 				c.messageHandler(pkg)
 			}
 		}
@@ -175,21 +193,21 @@ func (c *Client) dispatch() {
 }
 
 func (c *Client) tryConnect() {
-	c.watcher(zapcore.DebugLevel, "client connect loop start")
+	c.watcher(SysET, zapcore.DebugLevel, "client connect loop start")
 	c.loopHandle(c.retryInterval, func() bool {
 		if c.conn != nil {
 			return true
 		}
 
 		if err := c.connect(); err != nil {
-			c.watcher(zapcore.ErrorLevel, "client connect failed, err="+err.Error())
+			c.watcher(SysET, zapcore.ErrorLevel, "client connect failed, err="+err.Error())
 		} else {
 			c.connectIndex++
 			c.connectedHandler(c.connectIndex)
 		}
 
 		if c.retryInterval == 0 {
-			c.watcher(zapcore.WarnLevel, "client connect loop stopped, no retry interval")
+			c.watcher(SysET, zapcore.WarnLevel, "client connect loop stopped, no retry interval")
 			return false
 		}
 		return true

@@ -26,7 +26,7 @@ func Keepalive(interval time.Duration) Option {
 	}
 }
 
-func Logger(watcher func(level zapcore.Level, msg string, data ...zap.Field)) Option {
+func Logger(watcher func(eventType ET, level zapcore.Level, msg string, data ...zap.Field)) Option {
 	return func(client *Client) {
 		client.watcher = watcher
 	}
