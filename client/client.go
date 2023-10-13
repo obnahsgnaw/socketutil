@@ -145,7 +145,7 @@ func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
 					return
 				}
 				if interval > 0 {
-					time.Sleep(time.Second * interval)
+					time.Sleep(interval)
 				}
 			}
 		}
