@@ -1,4 +1,12 @@
 
+<a name="v0.7.2"></a>
+## [v0.7.2](https://8.140.161.172/wangsb/wgateway/compare/v0.7.1...v0.7.2) (2023-10-14)
+
+### Bug Fixes
+
+* **codec:** fix codec provider
+
+
 <a name="v0.7.1"></a>
 ## [v0.7.1](https://8.140.161.172/wangsb/wgateway/compare/v0.7.0...v0.7.1) (2023-10-14)
 
