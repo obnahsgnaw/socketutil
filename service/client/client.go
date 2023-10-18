@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/obnahsgnaw/socketutil/client"
 	"github.com/obnahsgnaw/socketutil/codec"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"log"
 	"strconv"
@@ -19,12 +18,14 @@ type DataStructure func() codec.DataPtr
 type Handler func(rqData codec.DataPtr) (respAction codec.Action, respData codec.DataPtr)
 
 type Client struct {
-	c        *client.Client
-	handlers sync.Map
-	cdc      codec.Codec
-	pgb      codec.PkgBuilder
-	dbd      codec.DataBuilder
-	watcher  func(eventType client.ET, level zapcore.Level, msg string, data ...zap.Field)
+	c          *client.Client
+	handlers   sync.Map
+	cdc        codec.Codec
+	pgb        codec.PkgBuilder
+	dbd        codec.DataBuilder
+	actWatcher func(action codec.Action, msg string)
+	pkgWatcher func(mtp client.MsgType, msg string, pkg []byte)
+	logWatcher func(level zapcore.Level, msg string)
 }
 
 type listenHandler struct {
@@ -39,8 +40,14 @@ func New(ctx context.Context, network string, host string, cdc codec.Codec, pgb 
 		cdc: cdc,
 		pgb: pgb,
 		dbd: dbd,
-		watcher: func(et client.ET, level zapcore.Level, msg string, data ...zap.Field) {
-			log.Println(level.String(), msg)
+		actWatcher: func(action codec.Action, msg string) {
+			log.Println("action[", action.Name, "]", msg)
+		},
+		pkgWatcher: func(mtp client.MsgType, msg string, pkg []byte) {
+			log.Println(mtp.String(), len(pkg), "types pkg:", pkg)
+		},
+		logWatcher: func(level zapcore.Level, msg string) {
+			log.Println(msg)
 		},
 	}
 	c.With(options...)
@@ -72,7 +79,6 @@ func (c *Client) Send(action codec.Action, data codec.DataPtr) error {
 	if err != nil {
 		return NewWrappedError("send action["+action.Name+"] failed,send failed", err)
 	}
-	c.watcher(client.SendET, zapcore.InfoLevel, "send action["+action.Name+"] success", zap.ByteString("pkg", b2))
 	return nil
 }
 
@@ -132,55 +138,55 @@ func (c *Client) getHandler(id codec.ActionId) (DataStructure, codec.Action, Han
 
 func (c *Client) dispatch(pkg []byte) {
 	defer RecoverHandler("client server dispatcher", func(err, stack string) {
-		c.watcher(client.SysET, zapcore.ErrorLevel, "dispatch failed, err="+err+", stack="+stack)
+		c.logWatcher(zapcore.ErrorLevel, "package dispatcher: dispatch failed, err="+err+", stack="+stack)
 	})
-	c.watcher(client.SysET, zapcore.DebugLevel, "dispatcher: received raw package", zap.ByteString("pkg", pkg))
 	// 沾包拼包
 	var err error
 	tmp := c.c.Tmp
 	c.c.Tmp = nil
 	if len(tmp) > 0 {
 		pkg = append(tmp, pkg...)
-		c.watcher(client.SysET, zapcore.DebugLevel, "dispatcher: withed tmp package", zap.ByteString("pkg", pkg))
 	}
 	// 沾包拆包
 	c.c.Tmp, err = c.cdc.Unmarshal(pkg, func(codePkg []byte) {
-		c.watcher(client.ReceiveET, zapcore.DebugLevel, "dispatcher: received message", zap.ByteString("pkg", codePkg))
+		c.pkgWatcher(client.Receive, "codec package", codePkg)
 		// 网关层的包拆包
 		gatewayPackage, err1 := c.pgb.Unpack(codePkg)
 		if err1 != nil {
-			c.watcher(client.ReceiveET, zapcore.ErrorLevel, "dispatcher: unpack gateway package failed, err="+err.Error())
+			c.logWatcher(zapcore.ErrorLevel, "package dispatcher: unpack gateway package failed, err="+err.Error())
 			return
 		}
-		c.watcher(client.ReceiveET, zapcore.DebugLevel, "dispatcher: received action: "+strconv.Itoa(int(gatewayPackage.Action)))
 		// todo decrypt
 		// 获取action
 		ds, action, handler, ok := c.getHandler(gatewayPackage.Action)
 		if !ok {
-			c.watcher(client.ReceiveET, zapcore.WarnLevel, "dispatcher: no action["+strconv.Itoa(int(gatewayPackage.Action))+"] handler")
+			c.logWatcher(zapcore.WarnLevel, "package dispatcher: no action["+strconv.Itoa(int(gatewayPackage.Action))+"] handler")
 			return
 		}
-		c.watcher(client.ReceiveET, zapcore.InfoLevel, "dispatcher: handle action="+action.String())
+		c.actWatcher(action, "handle start")
 		// data 解码
 		d := ds()
 		if err = c.dbd.Unpack(gatewayPackage.Data, d); err != nil {
-			c.watcher(client.ReceiveET, zapcore.ErrorLevel, "dispatcher: action data decode failed, err="+err.Error())
+			c.actWatcher(action, "data decode failed, err="+err.Error())
 			return
 		}
 		// 处理
 		respAction, respData := handler(d)
 		if respAction.Id <= 0 {
-			c.watcher(client.ReceiveET, zapcore.InfoLevel, "dispatcher: handle success, no response")
+			c.actWatcher(action, "handle success, but no response")
 			return
 		}
-		c.watcher(client.ReceiveET, zapcore.InfoLevel, "dispatcher: handle success, response action="+respAction.String())
 		// 回复
 		if err = c.Send(respAction, respData); err != nil {
-			c.watcher(client.ReceiveET, zapcore.ErrorLevel, "dispatcher: "+err.Error())
+			c.logWatcher(zapcore.ErrorLevel, "dispatcher: response action["+action.Name+"] failed,err="+err.Error())
+
+			c.actWatcher(action, "handle success, but response failed, err="+err.Error())
 		}
+
+		c.actWatcher(action, "handle success, response action="+respAction.String())
 	})
 	if err != nil {
-		c.watcher(client.ReceiveET, zapcore.ErrorLevel, "dispatcher: unpack codec package failed, err="+err.Error())
+		c.logWatcher(zapcore.ErrorLevel, "dispatcher: codec package failed, err="+err.Error())
 	}
 }
 

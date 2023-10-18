@@ -2,7 +2,7 @@ package client
 
 import (
 	client2 "github.com/obnahsgnaw/socketutil/client"
-	"go.uber.org/zap"
+	"github.com/obnahsgnaw/socketutil/codec"
 	"go.uber.org/zap/zapcore"
 	"time"
 )
@@ -39,9 +39,31 @@ func Disconnect(handler func(index int)) Option {
 	}
 }
 
-func Logger(watcher func(eventType client2.ET, level zapcore.Level, msg string, data ...zap.Field)) Option {
+func Logger(watcher func(level zapcore.Level, msg string)) Option {
 	return func(client *Client) {
-		client.watcher = watcher
+		if watcher == nil {
+			watcher = func(level zapcore.Level, msg string) {}
+		}
+		client.logWatcher = watcher
 		client.c.With(client2.Logger(watcher))
+	}
+}
+
+func ActionLogger(watcher func(action codec.Action, msg string)) Option {
+	return func(client *Client) {
+		if watcher == nil {
+			watcher = func(action codec.Action, msg string) {}
+		}
+		client.actWatcher = watcher
+	}
+}
+
+func PackageLogger(watcher func(mtp client2.MsgType, msg string, pkg []byte)) Option {
+	return func(client *Client) {
+		if watcher == nil {
+			watcher = func(mtp client2.MsgType, msg string, pkg []byte) {}
+		}
+		client.pkgWatcher = watcher
+		client.c.With(client2.Package(watcher))
 	}
 }

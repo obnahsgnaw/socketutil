@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"io"
 	"log"
@@ -12,23 +11,21 @@ import (
 	"time"
 )
 
-type ET int
-
-var EtMsg = map[ET]string{
-	SysET:     "server",
-	SendET:    "send",
-	ReceiveET: "receive",
-}
-
-func (e ET) String() string {
-	return EtMsg[e]
-}
+type MsgType int
 
 const (
-	SysET     ET = 0
-	SendET    ET = 1
-	ReceiveET ET = 2
+	Send    MsgType = 1
+	Receive MsgType = 2
 )
+
+var etMsg = map[MsgType]string{
+	Send:    "send",
+	Receive: "receive",
+}
+
+func (e MsgType) String() string {
+	return etMsg[e]
+}
 
 type Client struct {
 	ctx                 context.Context
@@ -38,12 +35,13 @@ type Client struct {
 	connectTimeout      time.Duration
 	conn                net.Conn
 	connectIndex        int
-	connectedHandler    func(index int)
+	connectedHandler    []func(index int)
 	disconnectIndex     int
-	disconnectedHandler func(index int)
+	disconnectedHandler []func(index int)
 	messageHandler      func(pkg []byte)
 	pkgChan             chan []byte
-	watcher             func(eventType ET, level zapcore.Level, msg string, data ...zap.Field)
+	pkgWatcher          func(mtp MsgType, msg string, pkg []byte)
+	logWatcher          func(level zapcore.Level, msg string)
 	Tmp                 []byte
 	keepAlive           time.Duration
 	network             string
@@ -56,18 +54,19 @@ func New(ctx context.Context, network string, host string, options ...Option) *C
 		network = "tcp"
 	}
 	c := &Client{
-		ctx:                 ctx1,
-		cancel:              cancel,
-		network:             network,
-		host:                host,
-		retryInterval:       time.Second * 3,
-		connectTimeout:      time.Second * 10,
-		pkgChan:             make(chan []byte, 10),
-		connectedHandler:    func(index int) {},
-		disconnectedHandler: func(index int) {},
-		messageHandler:      func(pkg []byte) {},
-		watcher: func(eventType ET, level zapcore.Level, msg string, data ...zap.Field) {
-			log.Println(level.String(), msg)
+		ctx:            ctx1,
+		cancel:         cancel,
+		network:        network,
+		host:           host,
+		retryInterval:  time.Second * 3,
+		connectTimeout: time.Second * 10,
+		pkgChan:        make(chan []byte, 10),
+		messageHandler: func(pkg []byte) {},
+		pkgWatcher: func(mtp MsgType, msg string, pkg []byte) {
+			log.Println(mtp.String(), len(pkg), "types pkg:", pkg)
+		},
+		logWatcher: func(level zapcore.Level, msg string) {
+			log.Println(msg)
 		},
 	}
 	c.With(options...)
@@ -88,11 +87,11 @@ func (c *Client) Start() {
 	c.startListen()
 	c.dispatch()
 	c.tryConnect()
-	c.watcher(SysET, zapcore.InfoLevel, "client start")
+	c.logWatcher(zapcore.InfoLevel, "client start")
 }
 
 func (c *Client) Stop() {
-	c.watcher(SysET, zapcore.InfoLevel, "client stop")
+	c.logWatcher(zapcore.InfoLevel, "client stop")
 	c.reset()
 	c.cancel()
 	close(c.pkgChan)
@@ -104,13 +103,23 @@ func (c *Client) Send(pkg []byte) error {
 	}
 	_, err := c.conn.Write(pkg)
 
-	if err != nil {
-		c.watcher(SendET, zapcore.ErrorLevel, "send package["+string(pkg)+"]failed,err="+err.Error())
-	} else {
-		c.watcher(SendET, zapcore.DebugLevel, "send package["+string(pkg)+"] success")
+	if err == nil {
+		c.pkgWatcher(Send, "raw package", pkg)
 	}
 
 	return err
+}
+
+func (c *Client) listenConnect(h func(index int)) {
+	if h != nil {
+		c.connectedHandler = append(c.connectedHandler, h)
+	}
+}
+
+func (c *Client) listenDisconnect(h func(index int)) {
+	if h != nil {
+		c.disconnectedHandler = append(c.disconnectedHandler, h)
+	}
 }
 
 func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
@@ -118,9 +127,20 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 		c.heartbeat(pkg)
 		return
 	}
-	c.loopHandle(interval, func() bool {
-		c.heartbeat(pkg)
-		return true
+	if c.conn != nil {
+		c.loopHandle(interval, func() bool {
+			c.heartbeat(pkg)
+			return true
+		})
+		return
+	}
+	c.listenConnect(func(index int) {
+		if index == 1 {
+			c.loopHandle(interval, func() bool {
+				c.heartbeat(pkg)
+				return true
+			})
+		}
 	})
 }
 
@@ -128,9 +148,9 @@ func (c *Client) heartbeat(pkg []byte) {
 	if c.conn == nil {
 		return
 	}
-	c.watcher(SendET, zapcore.DebugLevel, "heartbeat")
+	c.logWatcher(zapcore.DebugLevel, "heartbeat")
 	if err := c.Send(pkg); err != nil {
-		c.watcher(SendET, zapcore.ErrorLevel, "heartbeat failed,err="+err.Error())
+		c.logWatcher(zapcore.ErrorLevel, "heartbeat failed,err="+err.Error())
 	}
 }
 
@@ -153,7 +173,7 @@ func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
 }
 
 func (c *Client) startListen() {
-	c.watcher(SysET, zapcore.DebugLevel, "client listen start")
+	c.logWatcher(zapcore.DebugLevel, "client listen start")
 	c.loopHandle(0, func() bool {
 		if c.conn == nil {
 			time.Sleep(time.Millisecond * 100)
@@ -178,14 +198,14 @@ func (c *Client) startListen() {
 }
 
 func (c *Client) dispatch() {
-	c.watcher(SysET, zapcore.DebugLevel, "client package dispatch start")
+	c.logWatcher(zapcore.DebugLevel, "client package dispatch start")
 	go func(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case pkg := <-c.pkgChan:
-				c.watcher(ReceiveET, zapcore.DebugLevel, "receive package:"+string(pkg))
+				c.pkgWatcher(Receive, "raw package", pkg)
 				c.messageHandler(pkg)
 			}
 		}
@@ -193,21 +213,21 @@ func (c *Client) dispatch() {
 }
 
 func (c *Client) tryConnect() {
-	c.watcher(SysET, zapcore.DebugLevel, "client connect loop start")
+	c.logWatcher(zapcore.DebugLevel, "client connect loop start")
 	c.loopHandle(c.retryInterval, func() bool {
 		if c.conn != nil {
 			return true
 		}
 
 		if err := c.connect(); err != nil {
-			c.watcher(SysET, zapcore.ErrorLevel, "client connect failed, err="+err.Error())
+			c.logWatcher(zapcore.ErrorLevel, "client connect failed, err="+err.Error())
 		} else {
 			c.connectIndex++
-			c.connectedHandler(c.connectIndex)
+			c.triggerConnected(c.connectIndex)
 		}
 
 		if c.retryInterval == 0 {
-			c.watcher(SysET, zapcore.WarnLevel, "client connect loop stopped, no retry interval")
+			c.logWatcher(zapcore.WarnLevel, "client connect loop stopped, no retry interval")
 			return false
 		}
 		return true
@@ -234,7 +254,19 @@ func (c *Client) reset() {
 	if c.conn != nil {
 		_ = c.conn.Close()
 		c.disconnectIndex++
-		c.disconnectedHandler(c.disconnectIndex)
+		c.triggerDisconnected(c.disconnectIndex)
 		c.conn = nil
+	}
+}
+
+func (c *Client) triggerConnected(index int) {
+	for _, h := range c.connectedHandler {
+		h(index)
+	}
+}
+
+func (c *Client) triggerDisconnected(index int) {
+	for _, h := range c.disconnectedHandler {
+		h(index)
 	}
 }
