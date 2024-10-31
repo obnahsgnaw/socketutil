@@ -1,28 +1,32 @@
 package codec
 
-import "sync"
-
 type DataBuilderProvider interface {
 	Provider(Name) DataBuilder
 }
 
 type Dbp struct {
-	json  DataBuilder
-	proto DataBuilder
-	sync.Once
+	providers map[Name]DataBuilder
 }
 
+var DefaultDataBuilderProvider = NewDbp()
+
 func NewDbp() *Dbp {
-	return &Dbp{
-		json:  NewJsonDataBuilder(),
-		proto: NewProtobufDataBuilder(),
+	s := &Dbp{
+		providers: make(map[Name]DataBuilder),
 	}
+	s.Register(Json, NewJsonDataBuilder())
+	s.Register(Proto, NewProtobufDataBuilder())
+	return s
+}
+
+func (p *Dbp) Register(name Name, b DataBuilder) {
+	p.providers[name] = b
 }
 
 func (p *Dbp) Provider(name Name) DataBuilder {
-	if name == Json {
-		return p.json
+	if v, ok := p.providers[name]; ok {
+		return v
 	}
 
-	return p.proto
+	return p.providers[Proto]
 }
