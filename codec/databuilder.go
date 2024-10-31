@@ -14,6 +14,7 @@ type DataPtr interface{}
 
 // DataBuilder 包构建器
 type DataBuilder interface {
+	Name() Name
 	// Unpack  b 数据 p 对象指针
 	Unpack(b []byte, p DataPtr) (err error)
 	// Pack p 对象指针
@@ -27,6 +28,9 @@ func NewProtobufDataBuilder() DataBuilder {
 	return &protobufDataBuilder{}
 }
 
+func (pb *protobufDataBuilder) Name() Name {
+	return Proto
+}
 func (pb *protobufDataBuilder) Unpack(b []byte, p DataPtr) (err error) {
 	if len(b) == 0 {
 		return
@@ -62,6 +66,9 @@ func NewJsonDataBuilder() DataBuilder {
 	return &jsonDataBuilder{}
 }
 
+func (pb *jsonDataBuilder) Name() Name {
+	return Json
+}
 func (pb *jsonDataBuilder) Unpack(b []byte, p DataPtr) (err error) {
 	if len(b) == 0 || p == nil {
 		return
