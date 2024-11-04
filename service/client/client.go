@@ -18,15 +18,16 @@ type DataStructure func() codec.DataPtr
 type Handler func(rqData codec.DataPtr) (respAction codec.Action, respData codec.DataPtr)
 
 type Client struct {
-	c              *client.Client
-	handlers       sync.Map
-	cdc            codec.Codec
-	pgb            codec.PkgBuilder
-	dbd            codec.DataBuilder
-	pkgInterceptor PkgInterceptor
-	actWatcher     func(action codec.Action, msg string)
-	pkgWatcher     func(mtp client.MsgType, msg string, pkg []byte)
-	logWatcher     func(level zapcore.Level, msg string)
+	c                 *client.Client
+	handlers          sync.Map
+	cdc               codec.Codec
+	pgb               codec.PkgBuilder
+	dbd               codec.DataBuilder
+	pkgInterceptor    PkgInterceptor
+	listenInterceptor func([]byte) []byte
+	actWatcher        func(action codec.Action, msg string)
+	pkgWatcher        func(mtp client.MsgType, msg string, pkg []byte)
+	logWatcher        func(level zapcore.Level, msg string)
 }
 
 type listenHandler struct {
@@ -77,6 +78,7 @@ func (c *Client) SendRaw(b []byte) (err error) {
 	}
 	return
 }
+
 func (c *Client) Send(action codec.Action, data codec.DataPtr) (err error) {
 	var b2 []byte
 
@@ -161,6 +163,13 @@ func (c *Client) dispatch(pkg []byte) {
 	c.c.Tmp = nil
 	if len(tmp) > 0 {
 		pkg = append(tmp, pkg...)
+	}
+
+	if c.listenInterceptor != nil {
+		pkg = c.listenInterceptor(pkg)
+		if len(pkg) == 0 {
+			return
+		}
 	}
 	// 沾包拆包
 	c.c.Tmp, err = c.cdc.Unmarshal(pkg, func(codePkg []byte) {

@@ -12,3 +12,11 @@ func GatewayPkgInterceptor(i PkgInterceptor) Option {
 		}
 	}
 }
+
+func ListenInterceptor(listenInterceptor func([]byte) []byte) Option {
+	return func(c *Client) {
+		if listenInterceptor != nil {
+			c.listenInterceptor = listenInterceptor
+		}
+	}
+}
