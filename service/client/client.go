@@ -71,16 +71,24 @@ func (c *Client) Listen(action codec.Action, structure DataStructure, handler Ha
 	})
 }
 
-func (c *Client) Send(action codec.Action, data codec.DataPtr) error {
-	b2, err := c.Pack(action, data)
-	if err != nil {
-		return err
+func (c *Client) SendRaw(b []byte) (err error) {
+	if err = c.c.Send(b); err != nil {
+		err = NewWrappedError("send failed", err)
 	}
-	err = c.c.Send(b2)
-	if err != nil {
-		return NewWrappedError("send action["+action.Name+"] failed,send failed", err)
+	return
+}
+func (c *Client) Send(action codec.Action, data codec.DataPtr) (err error) {
+	var b2 []byte
+
+	if b2, err = c.Pack(action, data); err != nil {
+		return
 	}
-	return nil
+
+	if err = c.SendRaw(b2); err != nil {
+		err = NewWrappedError("send action["+action.Name+"] failed", err)
+	}
+
+	return
 }
 
 func (c *Client) Pack(action codec.Action, data codec.DataPtr) ([]byte, error) {
