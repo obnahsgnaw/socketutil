@@ -18,14 +18,15 @@ type DataStructure func() codec.DataPtr
 type Handler func(rqData codec.DataPtr) (respAction codec.Action, respData codec.DataPtr)
 
 type Client struct {
-	c          *client.Client
-	handlers   sync.Map
-	cdc        codec.Codec
-	pgb        codec.PkgBuilder
-	dbd        codec.DataBuilder
-	actWatcher func(action codec.Action, msg string)
-	pkgWatcher func(mtp client.MsgType, msg string, pkg []byte)
-	logWatcher func(level zapcore.Level, msg string)
+	c              *client.Client
+	handlers       sync.Map
+	cdc            codec.Codec
+	pgb            codec.PkgBuilder
+	dbd            codec.DataBuilder
+	pkgInterceptor PkgInterceptor
+	actWatcher     func(action codec.Action, msg string)
+	pkgWatcher     func(mtp client.MsgType, msg string, pkg []byte)
+	logWatcher     func(level zapcore.Level, msg string)
 }
 
 type listenHandler struct {
@@ -88,7 +89,6 @@ func (c *Client) Pack(action codec.Action, data codec.DataPtr) ([]byte, error) {
 	if err != nil {
 		return nil, NewWrappedError("send action["+action.Name+"] failed,pack data failed", err)
 	}
-	// todo encrypt
 	// action封包
 	b1, err := c.pgb.Pack(&codec.PKG{
 		Action: action.Id,
@@ -96,6 +96,13 @@ func (c *Client) Pack(action codec.Action, data codec.DataPtr) ([]byte, error) {
 	})
 	if err != nil {
 		return nil, NewWrappedError("send action["+action.Name+"] failed,pack gateway package failed", err)
+	}
+	// 拦截器封包
+	if c.pkgInterceptor != nil {
+		b1, err = c.pkgInterceptor.Encode(b1)
+		if err != nil {
+			return nil, NewWrappedError("send action["+action.Name+"] failed, interceptor encode package failed", err)
+		}
 	}
 	// codec封包
 	b2, err := c.cdc.Marshal(b1)
@@ -150,13 +157,21 @@ func (c *Client) dispatch(pkg []byte) {
 	// 沾包拆包
 	c.c.Tmp, err = c.cdc.Unmarshal(pkg, func(codePkg []byte) {
 		c.pkgWatcher(client.Receive, "codec package", codePkg)
+		// 拦截器解码
+		if c.pkgInterceptor != nil {
+			var err1 error
+			codePkg, err1 = c.pkgInterceptor.Decode(codePkg)
+			if err1 != nil {
+				c.logWatcher(zapcore.ErrorLevel, "package dispatcher: interceptor decode package failed, err="+err.Error())
+				return
+			}
+		}
 		// 网关层的包拆包
 		gatewayPackage, err1 := c.pgb.Unpack(codePkg)
 		if err1 != nil {
 			c.logWatcher(zapcore.ErrorLevel, "package dispatcher: unpack gateway package failed, err="+err.Error())
 			return
 		}
-		// todo decrypt
 		// 获取action
 		ds, action, handler, ok := c.getHandler(gatewayPackage.Action)
 		if !ok {
@@ -189,5 +204,3 @@ func (c *Client) dispatch(pkg []byte) {
 		c.logWatcher(zapcore.ErrorLevel, "dispatcher: codec package failed, err="+err.Error())
 	}
 }
-
-// todo gateway err, auth, crypt
