@@ -177,16 +177,15 @@ func (c *Client) dispatch(pkg []byte) {
 		// 拦截器解码
 		if c.pkgInterceptor != nil {
 			var err1 error
-			codePkg, err1 = c.pkgInterceptor.Decode(codePkg)
-			if err1 != nil {
-				c.logWatcher(zapcore.ErrorLevel, "package dispatcher: interceptor decode package failed, err="+err.Error())
+			if codePkg, err1 = c.pkgInterceptor.Decode(codePkg); err1 != nil {
+				c.logWatcher(zapcore.ErrorLevel, "package dispatcher: interceptor decode package failed, err="+err1.Error())
 				return
 			}
 		}
 		// 网关层的包拆包
 		gatewayPackage, err1 := c.pgb.Unpack(codePkg)
 		if err1 != nil {
-			c.logWatcher(zapcore.ErrorLevel, "package dispatcher: unpack gateway package failed, err="+err.Error())
+			c.logWatcher(zapcore.ErrorLevel, "package dispatcher: unpack gateway package failed, err="+err1.Error())
 			return
 		}
 		// 获取action
