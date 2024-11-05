@@ -45,6 +45,7 @@ type Client struct {
 	Tmp                 []byte
 	keepAlive           time.Duration
 	network             string
+	heartbeatCancel     context.CancelFunc
 }
 
 // New a socket client, network: tcp tcp4 tcp6 udp udp4 udp6 ...
@@ -128,20 +129,17 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 		return
 	}
 	if c.conn != nil {
-		c.loopHandle(interval, func() bool {
+		ctx, cancel := context.WithCancel(c.ctx)
+		if c.heartbeatCancel != nil {
+			c.heartbeatCancel()
+		}
+		c.heartbeatCancel = cancel
+		c.loopHandle(ctx, interval, func() bool {
 			c.heartbeat(pkg)
 			return true
 		})
 		return
 	}
-	c.listenConnect(func(index int) {
-		if index == 1 {
-			c.loopHandle(interval, func() bool {
-				c.heartbeat(pkg)
-				return true
-			})
-		}
-	})
 }
 
 func (c *Client) heartbeat(pkg []byte) {
@@ -154,11 +152,11 @@ func (c *Client) heartbeat(pkg []byte) {
 	}
 }
 
-func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
-	go func(ctx context.Context) {
+func (c *Client) loopHandle(ctx context.Context, interval time.Duration, cb func() bool) {
+	go func(ctx1 context.Context) {
 		for {
 			select {
-			case <-ctx.Done():
+			case <-ctx1.Done():
 				return
 			default:
 				if !cb() {
@@ -169,12 +167,12 @@ func (c *Client) loopHandle(interval time.Duration, cb func() bool) {
 				}
 			}
 		}
-	}(c.ctx)
+	}(ctx)
 }
 
 func (c *Client) startListen() {
 	c.logWatcher(zapcore.DebugLevel, "client listen start")
-	c.loopHandle(0, func() bool {
+	c.loopHandle(c.ctx, 0, func() bool {
 		if c.conn == nil {
 			time.Sleep(time.Millisecond * 100)
 			return true
@@ -214,7 +212,7 @@ func (c *Client) dispatch() {
 
 func (c *Client) tryConnect() {
 	c.logWatcher(zapcore.DebugLevel, "client connect loop start")
-	c.loopHandle(c.retryInterval, func() bool {
+	c.loopHandle(c.ctx, c.retryInterval, func() bool {
 		if c.conn != nil {
 			return true
 		}
