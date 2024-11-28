@@ -46,6 +46,7 @@ type Client struct {
 	keepAlive           time.Duration
 	network             string
 	heartbeatCancel     context.CancelFunc
+	heartbeatPaused     bool
 }
 
 // New a socket client, network: tcp tcp4 tcp6 udp udp4 udp6 ...
@@ -123,6 +124,14 @@ func (c *Client) listenDisconnect(h func(index int)) {
 	}
 }
 
+func (c *Client) HeartbeatPause() {
+	c.heartbeatPaused = true
+}
+
+func (c *Client) HeartbeatContinue() {
+	c.heartbeatPaused = false
+}
+
 func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 	if interval <= 0 {
 		c.heartbeat(pkg)
@@ -135,7 +144,9 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 		}
 		c.heartbeatCancel = cancel
 		c.loopHandle(ctx, interval, func() bool {
-			c.heartbeat(pkg)
+			if !c.heartbeatPaused {
+				c.heartbeat(pkg)
+			}
 			return true
 		})
 		return

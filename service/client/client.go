@@ -127,6 +127,14 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 	c.c.Heartbeat(pkg, interval)
 }
 
+func (c *Client) HeartbeatPause() {
+	c.c.HeartbeatPause()
+}
+
+func (c *Client) HeartbeatContinue() {
+	c.c.HeartbeatContinue()
+}
+
 func (c *Client) Start() {
 	c.c.Start()
 }
