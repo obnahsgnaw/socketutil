@@ -92,7 +92,6 @@ func NewJsonPackageBuilder(toData func(*PKG) DataPtr, toPKG func(DataPtr) *PKG) 
 // Unpack 拆包
 func (pp *JsonPackageBuilder) Unpack(b []byte) (p *PKG, err error) {
 	if len(b) == 0 {
-		err = ErrNoData
 		return
 	}
 	p1 := pp.gen(&PKG{})

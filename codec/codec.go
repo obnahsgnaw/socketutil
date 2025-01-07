@@ -89,7 +89,6 @@ func NewWebsocketCodec() Codec {
 
 func (codec *websocketCodec) Marshal(b []byte) (d []byte, err error) {
 	if len(b) == 0 {
-		err = errors.New("codec error: Codec encode package failed, package is empty. ")
 		return
 	}
 	d = b
@@ -132,7 +131,6 @@ func NewLengthCodec(magicNumber uint16, bodyMax int) Codec {
 }
 
 var (
-	ErrPkgEmpty        = errors.New("codec error: Codec encode package failed, package is empty. ")
 	ErrPkgTooLong      = errors.New("codec error: Codec encode package failed, package too long. ")
 	ErrInvalidMagicNum = errors.New("codec error: Codec decode package failed, invalid magic number ")
 )
@@ -140,7 +138,6 @@ var (
 func (codec *lengthCodec) Marshal(b []byte) (d []byte, err error) {
 	// 验证长度
 	if len(b) == 0 {
-		err = ErrPkgEmpty
 		return
 	}
 	if len(b) > codec.bodyMaxSize {
