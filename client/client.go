@@ -3,10 +3,12 @@ package client
 import (
 	"context"
 	"errors"
+	"github.com/gorilla/websocket"
 	"go.uber.org/zap/zapcore"
 	"io"
 	"log"
 	"net"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -34,6 +36,8 @@ type Client struct {
 	retryInterval       time.Duration
 	connectTimeout      time.Duration
 	conn                net.Conn
+	wsConn              *websocket.Conn
+	wsLock              sync.Mutex
 	connectIndex        int
 	connectedHandler    []func(index int)
 	disconnectIndex     int
@@ -99,11 +103,17 @@ func (c *Client) Stop() {
 	close(c.pkgChan)
 }
 
-func (c *Client) Send(pkg []byte) error {
-	if c.conn == nil {
+func (c *Client) Send(pkg []byte) (err error) {
+	if c.conn == nil && c.wsConn == nil {
 		return errors.New("client error: not connected")
 	}
-	_, err := c.conn.Write(pkg)
+	if c.conn != nil {
+		_, err = c.conn.Write(pkg)
+	} else {
+		c.wsLock.Lock()
+		defer c.wsLock.Unlock()
+		err = c.wsConn.WriteMessage(websocket.TextMessage, pkg)
+	}
 
 	if err == nil {
 		c.pkgWatcher(Send, "raw package", pkg)
@@ -137,7 +147,7 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 		c.heartbeat(pkg)
 		return
 	}
-	if c.conn != nil {
+	if c.conn != nil || c.wsConn != nil {
 		ctx, cancel := context.WithCancel(c.ctx)
 		if c.heartbeatCancel != nil {
 			c.heartbeatCancel()
@@ -154,7 +164,7 @@ func (c *Client) Heartbeat(pkg []byte, interval time.Duration) {
 }
 
 func (c *Client) heartbeat(pkg []byte) {
-	if c.conn == nil {
+	if c.conn == nil || c.wsConn == nil {
 		return
 	}
 	c.logWatcher(zapcore.DebugLevel, "heartbeat")
@@ -184,24 +194,33 @@ func (c *Client) loopHandle(ctx context.Context, interval time.Duration, cb func
 func (c *Client) startListen() {
 	c.logWatcher(zapcore.DebugLevel, "client listen start")
 	c.loopHandle(c.ctx, 0, func() bool {
-		if c.conn == nil {
+		if c.conn == nil && c.wsConn == nil {
 			time.Sleep(time.Millisecond * 100)
 			return true
 		}
-		buf := [1024]byte{}
-		n, err := c.conn.Read(buf[:])
-		if err != nil || n == 0 {
-			if errors.Is(syscall.EINVAL, err) || errors.Is(io.EOF, err) {
-				time.Sleep(time.Millisecond * 100)
-				c.reset()
-				return true
-			} else {
-				time.Sleep(time.Millisecond * 100)
-				return true
+		var packages []byte
+		var err error
+		if c.conn != nil {
+			buf := [1024]byte{}
+			var n int
+			n, err = c.conn.Read(buf[:])
+			if err == nil && n > 0 {
+				packages = buf[:n]
 			}
+		} else {
+			_, packages, err = c.wsConn.ReadMessage()
 		}
-		packages := buf[:n]
-		c.pkgChan <- packages
+		if err != nil {
+			var closeError *websocket.CloseError
+			if errors.Is(syscall.EINVAL, err) || errors.Is(io.EOF, err) || errors.As(err, &closeError) {
+				c.reset()
+			}
+			time.Sleep(time.Millisecond * 100)
+			return true
+		}
+		if len(packages) > 0 {
+			c.pkgChan <- packages
+		}
 		return true
 	})
 }
@@ -224,7 +243,7 @@ func (c *Client) dispatch() {
 func (c *Client) tryConnect() {
 	c.logWatcher(zapcore.DebugLevel, "client connect loop start")
 	c.loopHandle(c.ctx, c.retryInterval, func() bool {
-		if c.conn != nil {
+		if c.conn != nil || c.wsConn != nil {
 			return true
 		}
 
@@ -245,16 +264,24 @@ func (c *Client) tryConnect() {
 
 func (c *Client) connect() error {
 	c.reset()
-	dialer := net.Dialer{
-		Timeout:   c.connectTimeout,
-		KeepAlive: c.keepAlive,
-	}
-	conn, err := dialer.Dial(c.network, c.host)
-	if err != nil {
-		return err
-	}
+	if c.network == "ws" || c.network == "wss" {
+		conn, _, err := websocket.DefaultDialer.Dial(c.network+"://"+c.host, nil)
+		if err != nil {
+			return err
+		}
+		c.wsConn = conn
+	} else {
+		dialer := net.Dialer{
+			Timeout:   c.connectTimeout,
+			KeepAlive: c.keepAlive,
+		}
+		conn, err := dialer.Dial(c.network, c.host)
+		if err != nil {
+			return err
+		}
 
-	c.conn = conn
+		c.conn = conn
+	}
 
 	return nil
 }
@@ -265,6 +292,12 @@ func (c *Client) reset() {
 		c.disconnectIndex++
 		c.triggerDisconnected(c.disconnectIndex)
 		c.conn = nil
+	}
+	if c.wsConn != nil {
+		_ = c.wsConn.Close()
+		c.disconnectIndex++
+		c.triggerDisconnected(c.disconnectIndex)
+		c.wsConn = nil
 	}
 }
 
